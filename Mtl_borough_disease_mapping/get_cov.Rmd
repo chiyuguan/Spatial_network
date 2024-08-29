@@ -1,0 +1,685 @@
+---
+title: "CensusMap_Descriptive"
+author: "H"
+ 
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+ 
+Following codes create the map of socio-economic and demographic indicators from the data frame containing census vector of each year, which was created in the `censusVar_Mapping.Rmd` script.
+ 
+Also saves census data locally `data/city/listCen.rds`
+And Saves DA shape files to remote DB as well, to be intersected to intervention lines.
+ 
+ 
+```{r setup, message=FALSE, warning=FALSE}
+ 
+# Libraries
+knitr::opts_chunk$set(echo = TRUE)
+library(sf)
+library(rgdal)
+library(tidyverse)
+library(cancensus)
+library(ggmap)
+library(stringr)
+library(kableExtra)
+library(htmlTable)
+library(ggsankey)
+library(grid)
+library(gridExtra)
+library(cowplot)
+library(ggpubr)
+library(RPostgres)
+library(rpostgis)
+library(readxl)
+library(dplyr)
+
+rm(list=ls())
+ 
+# Canceuss 
+#options(cancensus.cache_path = "cache/")
+#set_cancensus_cache_path("cache/", install = TRUE)
+options(cancensus.cache_path = "cache/.cancensus_cache")
+ 
+bool_loadCensus = TRUE
+ 
+# Plot global params 
+theme_set(theme_classic())
+theme_set(
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    rect = element_blank(), 
+    text = element_text(size=12), 
+    plot.title = element_text(size=15),   
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 12)
+    )
+)
+ 
+ 
+# Load census vector names for each year 
+dfCensVec <- readRDS("censMappedVars.rds")
+ 
+ 
+# Variable name description 
+dfVarDesc<- data.frame(Description = c(
+  "Visible Minority", 
+  "Indigenous identity", 
+  "Max High sch, 15",
+  "Max High sch, 25-64",
+  "No High sch, 15",
+  "No High sch, 25-64",
+  "Moved past 5 yrs", 
+  "Moved past 1 yr", 
+  "Low-income cutoff", 
+  "Recent immigrants",
+  "Age below 15", 
+  "Age over 65", 
+  ">30% of income for housing", 
+  "Tenant, as opposed to owner"), 
+  varName = c(
+    "i_visMin",
+    "i_aboriginal",
+    "i_educ_15",
+    "i_educ_25_64",
+    "i_educ_noHS_15",
+    "i_educ_noHS_25_64",
+    "i_move_5yrs",
+    "i_move_1yrs",
+    "i_LICO",
+    "i_rec_imm",
+    "i_young",
+    "i_old",
+    "i_tenant_30income",
+    "i_tenant"
+  ), 
+varShortName =c(
+  "Visible minorities",
+  "Aboriginal",
+  "High school",
+  "Education_25",
+  "No High school",
+  "No High school 25",
+  "Recent movers",
+  "Recent move_1yr",
+  "Low income",
+  "Recent immigrants",
+  "Children",
+  "Seniors",
+  "Housing expense",
+  "Tenants")
+)
+ 
+ 
+ 
+```
+ 
+Download census data based on the identified vector names, and create proporiton measures for each dissemination area. Rehspaed for facet map originally, but protting through looping. 
+```{r}
+funcGetCensVector <- function(df, dfVarDesc){
+  # Calculate proportions
+  df <- funcCensusIndicator(df)
+  # Make it long if used for facet plot  
+  dfMapLong <- df %>% 
+    select(starts_with("i_")) %>% 
+    pivot_longer(cols = starts_with("i_"), names_to = "x",values_to = "y")
+  # Join sf with variable description
+  dfMapLong <- dfMapLong %>% 
+    left_join(dfVarDesc, by = c("x"="varName"))
+  return(dfMapLong)
+}
+
+funcGetBoroVector <- function(df, dfVarDesc, Population_W){
+  # Calculate proportions
+  df <- funcBoroIndicator(df, Population_W)
+  # Make it long if used for facet plot  
+  dfMapLong <- df %>% 
+    select(starts_with("i_")) %>% 
+    pivot_longer(cols = starts_with("i_"), names_to = "x",values_to = "y")
+  # Join sf with variable description
+  dfMapLong <- dfMapLong %>% 
+    left_join(dfVarDesc, by = c("x"="varName"))
+  return(dfMapLong)
+}
+ 
+ 
+ 
+# function to create variable name 
+# funcCensusIndicator <- function(df,Population_W){
+#   df %>% 
+#     mutate(i_visMin = Population_W*(visibleMin_count/visibleMin_denom), #yes
+#            i_aboriginal = indigi_count/indigi_denom, #no
+#            i_educ_15 = educ_HS_count_15yr/educ_HS_denom_15yr, #no
+#            i_educ_25_64 = educ_HS_count_25_64yr/educ_HS_denom_25_64yr, #no
+#            i_educ_noHS_15 = educ_no_HS_count_15yr/educ_HS_denom_15yr,  #no
+#            i_educ_noHS_25_64 = Population_W*(educ_no_HS_count_25_64yr/educ_HS_denom_25_64yr),  #yes
+#            i_move_5yrs = Population_W*(move_5yr_count/move_5yr_denom), #yes
+#            i_move_1yrs = move_1yr_count/move_1yr_denom, #no
+#            i_LICO = Population_W*(LICO_prevalence*0.01), #make it to proportion  #yes
+#            i_rec_imm = Population_W*(recentImmig_count/recentImmig_denom), #yes
+#            i_young = Population_W*(age_1_14_count/age_denom), #yes
+#            i_old =  Population_W*(age_64_over/age_denom), #yes
+#            i_tenant_30income = housingExpend_30_count/property_denom, #no
+#            i_tenant = Population_W*(tenant_count/(property_denom))#yes
+#     ) %>% 
+#     select(i_visMin, i_educ_noHS_25_64, i_move_5yrs, i_LICO, i_rec_imm, i_young, i_old, i_tenant)
+# }
+
+funcCensusIndicator <- function(df){
+  df %>% 
+    mutate(i_visMin = (visibleMin_count/visibleMin_denom), #yes
+           i_aboriginal = indigi_count/indigi_denom, #no
+           i_educ_15 = educ_HS_count_15yr/educ_HS_denom_15yr, #no
+           i_educ_25_64 = educ_HS_count_25_64yr/educ_HS_denom_25_64yr, #no
+           i_educ_noHS_15 = educ_no_HS_count_15yr/educ_HS_denom_15yr,  #no
+           i_educ_noHS_25_64 = (educ_no_HS_count_25_64yr/educ_HS_denom_25_64yr),  #yes
+           i_move_5yrs = (move_5yr_count/move_5yr_denom), #yes
+           i_move_1yrs = move_1yr_count/move_1yr_denom, #no
+           i_LICO = (LICO_prevalence*0.01), #make it to proportion  #yes
+           i_rec_imm = (recentImmig_count/recentImmig_denom), #yes
+           i_young = (age_1_14_count/age_denom), #yes
+           i_old =  (age_64_over/age_denom), #yes
+           i_tenant_30income = housingExpend_30_count/property_denom, #no
+           i_tenant = (tenant_count/(property_denom))#yes
+    ) %>% 
+    select(i_visMin, i_educ_noHS_25_64, i_LICO, NOM)
+}
+
+funcBoroIndicator <- function(df,Population_W){ # df <- mtl_Boro # get covariates
+  df <- df %>%
+    mutate(i_visMin = Population_W*(visibleMin_count/visibleMin_denom), #yes
+           i_educ_noHS_25_64 = Population_W*(educ_no_HS_count_25_64yr/educ_HS_denom_25_64yr),  #yes
+           #i_move_5yrs = Population_W*(move_5yr_count/move_5yr_denom), #yes
+           i_LICO = Population_W*(LICO_prevalence*0.01), #make it to proportion  #yes
+           i_rec_imm = Population_W*(recentImmig_count/recentImmig_denom), #yes
+           i_young = Population_W*(age_1_14_count/age_denom), #yes
+           i_old =  Population_W*(age_64_over/age_denom), #yes
+           i_tenant = Population_W*(tenant_count/(property_denom))#yes
+     ) %>%
+    replace(is.na(.), 0) %>% 
+    select(NOM,i_visMin, i_educ_noHS_25_64, i_LICO)
+  
+  df %>%
+    group_by(NOM) %>% 
+    summarise(across(c(i_visMin,
+                       i_educ_noHS_25_64,
+                       #i_move_5yrs,
+                       i_LICO), sum))
+}
+ 
+```
+ 
+ 
+### 2021 data 
+```{r}
+options(cancensus.api_key = "CensusMapper_91294cf61b6144bca0fcac3333a180b6")
+options(cancensus.cache_path = "./")
+
+# Following codes will extract the census vectors, along with polygons 
+b <- dfCensVec %>% pull(X2021)
+b <- setNames(b, rownames(dfCensVec)) # Make it named vector so that variable names will be passed to extracted census vars  
+ 
+ 
+mtl_2021 <- get_census(dataset="CA21", 
+                 regions=list(CMA='24462'), 
+                 vectors=b,
+                 level= "CT", 
+                 use_cache = TRUE, 
+                 geo_format = "sf", 
+                 quiet = TRUE, 
+                 api_key = Sys.getenv("CM_API_KEY")) %>% #### NEED to use your own API KEY 
+    mutate(interact_aoi = (CD_UID %in% c(2466, 2465, 2458)) & !(CSD_UID %in% c(2458033, 2458037))) %>% 
+    mutate(hiroshi_old_aoi = (CSD_UID %in% c("2466127", "2466117", "2465005", "2466112","2466007", "2466023", "2466087", "2466097", "2466032", "2466107" , "2458227", "2458007") 
+    ))
+
+
+## Get boroughs and related cities of MTL
+mtl<-st_read("limites-administratives-agglomeration.shp")
+
+# mtl2<-get_census(dataset="CA21", 
+#                  regions=list(CMA='24462'), 
+#                  vectors=b,
+#                  level= "CSD", 
+#                  use_cache = TRUE, 
+#                  geo_format = "sf", 
+#                  quiet = TRUE, 
+#                  api_key = Sys.getenv("CM_API_KEY")) 
+
+mtl_2021 <- mtl_2021 %>% filter(interact_aoi == TRUE )
+
+
+ggplot(mtl_2021) + geom_sf(aes(fill=Population)) + geom_sf(data=mtl, color = "white", fill = NA)
+#ggplot(mtl2) + geom_sf(aes(fill=Population)) + geom_sf(data=mtl, color = "white", fill = NA)
+
+### ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ###
+# Get the Boro level count
+### ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ###
+# mtl_Boro <- mtl_2021  %>%
+#   st_join(mtl, largest = TRUE) %>%
+#   filter(!is.na(NOM)) %>% 
+#   replace(is.na(.), 0) %>%
+#   group_by(NOM) %>% 
+#   summarise(across(c(Population,
+                     # visibleMin_count,
+                     # visibleMin_denom,
+                     # educ_no_HS_count_25_64yr,
+                     # educ_HS_denom_25_64yr,
+                     # LICO_prevalence,
+                     # recentImmig_count,
+                     # recentImmig_denom,
+                     # age_1_14_count,
+                     # age_64_over,
+                     # age_denom,
+                     # tenant_count,
+                     # property_denom), sum)) #%>% ggplot() + geom_sf()
+# mtl_Boro <- mtl_Boro[-12,] #remove L'Île-Dorval area
+
+# get boro information for the mtl_2021(CT level)
+mtl_Boro <- mtl_2021  %>%
+  st_join(mtl, largest = TRUE) %>%
+  filter(!is.na(NOM)) %>% 
+  replace(is.na(.), 0)
+mtl_Boro_Total <- mtl_Boro %>%
+  group_by(NOM) %>% 
+  summarise(Population = sum(Population))
+ggplot(mtl_Boro_Total) + geom_sf(aes(fill=Population)) 
+
+### ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ###
+# r = total count in Monreal/all population in Montreal
+# r= sum of count in all borogh/all population in all boroght
+# E_i = pop_i * r
+# i is borough
+### ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ###
+# Population_W <- mtl_Boro_Total$Population/sum(mtl_Boro_Total$Population) #for each boro_i=pop_i/sum_all_i(pop_i)
+# mtl_Boro_Total$Expected_count_for_each_boro <- round(sum(last_week_2021_new_cases_total$last_week_2021_new_cases_total)*Population_W, 0)
+
+### ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ###
+Population_W <- mtl_Boro_Total$Population/sum(mtl_Boro_Total$Population) #for each boro_i=pop_i/sum_all_i(pop_i)
+mtl_Boro_Total$Expected_count_for_each_boro <- round(sum(last_week_2021_new_cases_total$last_week_2021_new_cases_total)*Population_W, 0)
+
+### ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ###
+# Get the weight for each CT area in each Boro, add this col to mtl_Boro
+### ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ###
+
+mtl_Boro_weight <- mtl_Boro %>% 
+  select(Population,GeoUID, NOM) %>% 
+  st_drop_geometry() %>%
+  left_join(mtl_Boro_Total, by = c("NOM" = "NOM")) %>%
+  rename("Population_CT" = "Population.x") %>%
+  rename("Population_Boro" = "Population.y") 
+
+# Weighted by Population_CT/Population_Boro
+mtl_Boro$Population_W <- mtl_Boro_weight$Population_CT/mtl_Boro_weight$Population_Boro
+summary(mtl_Boro$Population_W)
+
+ggplot(mtl_Boro) + 
+  geom_sf(aes(fill=Population_W)) + 
+  geom_sf(data=mtl, color = "white", fill = NA) + 
+  ggtitle("2021 Weighted(By borough level) Population for each CT area")
+# get_census(dataset="CA21", 
+#                   regions=list(CMA='24462'), 
+#                   vectors=b,
+#                   level= "CSD",  #CD
+#                   use_cache = TRUE, 
+#                    geo_format = "sf", 
+#                    quiet = TRUE, 
+#                    api_key = Sys.getenv("CM_API_KEY")) 
+
+#a <- mtl_Boro_1 %>% filter(NOM=="Verdun")
+```
+ 
+```{r}
+plot_case <- my_data3 %>% 
+  select(last_week_2021_new_cases_total,geometry.x)
+
+# Create the map
+ggplot(data = plot_case) +
+  geom_sf(aes(fill = last_week_2021_new_cases_total, geometry = geometry.x)) +
+  scale_fill_viridis_c() + # Optional: use a color scale for better visualization
+  theme_map() +
+  labs(title = "Distribution of one week cases in 2021 observed",
+       fill = "Weekly cases in 2021 observed",
+       caption = "Source: https://github.com/jeremymoreau/covid19mtl/tree/master/app/data/sources")
+
+```
+
+
+### Pop density  
+```{r}
+# library(magrittr)
+# mtl_2021  %<>%  mutate(popDensity_per1000 = Population/`Shape Area`/1000)
+#  
+# ggplot() + 
+#   geom_sf(data = mtl_2021, aes(fill= popDensity_per1000))
+ 
+```
+ 
+ 
+Corr plots 
+```{r fig.width = 10}
+mtl_Boro %>% 
+  funcCensusIndicator  %>% 
+  select(starts_with("i_")) %>% 
+  st_drop_geometry() %>% 
+  cor(use = "complete.obs") %>% 
+  corrplot::corrplot.mixed(number.cex = 0.5, tl.cex = 0.5)
+
+### ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ###
+# Get Cor_plot of the Covariates for each Boro
+### ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ###
+# a <- mtl_Boro %>% 
+#   group_by(NOM) %>% 
+#   summarise(visibleMin_prop = sum((visibleMin_count/visibleMin_denom) * Population_W))
+# class(a)
+# 
+# ggplot(a) + geom_sf(aes(fill = visibleMin_prop))
+
+Predictor_var <- funcBoroIndicator(mtl_Boro, mtl_Boro$Population_W)
+funcBoroIndicator(mtl_Boro, mtl_Boro$Population_W)  %>% 
+  select(starts_with("i_")) %>% 
+  st_drop_geometry() %>% 
+  cor(use = "complete.obs") %>% 
+  corrplot::corrplot.mixed(number.cex = 0.5, tl.cex = 0.5)
+
+# x = Predictor_var[,2:8] %>% st_drop_geometry();
+# x <- scale(x, center = TRUE, scale = TRUE)
+# # Convert the scaled data back to a data frame
+# x <- as.data.frame(x)
+# 
+# x %>% 
+#   cor(use = "complete.obs") %>% 
+#   corrplot::corrplot.mixed(number.cex = 0.5, tl.cex = 0.5)
+```
+ 
+ 
+### Plot proportion maps for 2021 -  Scales vary across maps !-------------------------------------------
+```{r fig.width=8, fig.height=8}
+## For CT
+dfMapLong_mtl_2021 <- funcGetCensVector(mtl_Boro, dfVarDesc)
+ 
+# Generate plot with descriptive name 
+pList_mtl_2021 <- list()
+ 
+for(i in dfVarDesc$Description){
+  pList_mtl_2021[[i]] <-  dfMapLong_mtl_2021 %>%
+    filter(Description == i) %>% 
+    ggplot() +
+    geom_sf(inherit.aes = FALSE, aes(fill = y), size =0.5, color= "black") + 
+    ggtitle(i) + 
+    theme(legend.position = "bottom") + 
+    theme(legend.text=element_text(size=9))
+}
+ 
+ 
+# And plot 
+pList_mtl_2021
+
+### ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ###
+## For Boro
+dfMapLong_mtl_2021 <- funcGetBoroVector(mtl_Boro, dfVarDesc, mtl_Boro$Population_W)
+ 
+# Generate plot with descriptive name 
+pList_mtl_2021 <- list()
+ 
+for(i in dfVarDesc$Description){
+  pList_mtl_2021[[i]] <-  dfMapLong_mtl_2021 %>%
+    filter(Description == i) %>% 
+    ggplot() +
+    geom_sf(inherit.aes = FALSE, aes(fill = y), size =0.5, color= "black") + 
+    ggtitle(i) + 
+    theme(legend.position = "bottom") + 
+    theme(legend.text=element_text(size=9))
+}
+ 
+ 
+# And plot 
+pList_mtl_2021
+
+last_week_2021_new_cases_total %>% 
+    ggplot() +
+    geom_sf(inherit.aes = FALSE, aes(fill = y), size =0.5, color= "black") 
+ 
+```
+
+making traffic in each borough
+```{r}
+## Connect to Data
+library(rpostgis)
+library(RPostgreSQL)
+library(RPostgres)
+
+# Create an object that has connection to remote Database whose aDDress is 132.... anD name of Db is safegraph
+conObesity <- RPostgreSQL::dbConnect("PostgreSQL", host = "132.216.183.3",
+                                     dbname = "safegraph", user = "chizhang",
+                                     password = "*******")
+
+# Write query to get Data - Data are too big, so DownloaD the first 100,000 only. I will later show how to DownloaD quebec Data only.  
+#q <- "select * from ca_od_long where province = 'QC';"
+q <- "select * from ca_od_long where province = 'QC' and Y = 2021 and m=12;"
+#q <- "select * from ca_od_long where province = 'QC' and Y = 2022 ;"
+#q <- "select * from ca_oD_long limit 30000:400000;"
+
+# SenD query to the Database
+routing <- dbGetQuery(conObesity, q)
+```
+
+```{r}
+library("devtools")
+library(dplyr)
+library(tmap)
+library(sf)
+library(cancensus)
+
+options(cancensus.api_key = "CensusMapper_91294cf61b6144bca0fcac3333a180b6")
+options(cancensus.cache_path = "./")
+
+DA <- get_census(dataset='CA21', 
+                 regions=list(CMA = "24462"),
+                 level='DA', use_cache = FALSE, geo_format = "sf", quiet = TRUE, 
+                 api_key = Sys.getenv("CM_API_KEY")) %>%
+  st_transform(crs = 2959)
+
+
+CT <- get_census(dataset='CA21', 
+                 regions=list(CMA = "24462"),
+                 level='CT', use_cache = FALSE, geo_format = "sf", quiet = TRUE, 
+                 api_key = Sys.getenv("CM_API_KEY")) %>%
+  st_transform(crs = 2959)
+
+mtl <- st_transform(mtl, 2959)
+DA_mtl <- DA %>% st_join(mtl, largest = T)
+
+DA_mtl %>% select(NOM, GeoUID) %>% st_drop_geometry()  %>% filter(!is.na(NOM))
+DA_MTL_Key <- unique(DA_mtl[, c('NOM', 'GeoUID', "CT_UID", "Population")]) %>% st_drop_geometry() %>% filter(!is.na(NOM)) 
+#DA_MTL_Key <- unique(DA_mtl[, c('NOM', 'GeoUID')]) %>% st_drop_geometry() %>% filter(!is.na(NOM)) 
+DA_MTL_Nom_pop_Key <- unique(DA_MTL_Key[, c('NOM', "Population")]) %>% st_drop_geometry() %>% filter(!is.na(NOM)) %>% group_by(NOM) %>%   
+  summarise(Population = sum(Population), .groups = 'drop')
+length(unique(DA_MTL_Key$GeoUID))
+
+library(dplyr)
+
+routing$area <- as.character(routing$area)
+routing$home_area <- as.character(routing$home_area)
+
+joined_Data_b <- routing %>%
+  left_join(DA_MTL_Key, by = c("area" = "GeoUID")) %>%
+  rename("CT_UID_area" = "CT_UID") %>%
+  rename("NOM_area" = "NOM") 
+
+# Join on 'home_area'
+final_Data_b <- joined_Data_b %>%
+  left_join(DA_MTL_Key, by = c("home_area" = "GeoUID")) %>%
+  rename("CT_UID_home_area" = "CT_UID") %>%
+  rename("NOM_home_area" = "NOM") 
+
+final_Data_b <- final_Data_b %>%
+  select(row.names, source, area, home_area, stops, province, y, m,
+         CT_UID_area, CT_UID_home_area, NOM_area, NOM_home_area)
+
+DA_clean_data <- final_Data_b %>% filter(!is.na(NOM_area)) %>% filter(!is.na(NOM_home_area))
+routing_2021_clean_data <- DA_clean_data %>%
+  group_by(NOM_area, NOM_home_area) %>%   
+  summarise(stops = sum(stops), .groups = 'drop') #weight/CT_UID_area
+max(routing_2021_clean_data$stops) #edges
+
+routing_2021_clean_data <- routing_2021_clean_data %>%
+  left_join(DA_MTL_Nom_pop_Key, by = c("NOM_area" = "NOM")) %>%
+  rename("Population_area" = "Population") 
+routing_2021_clean_data <- routing_2021_clean_data %>%
+  select(NOM_area, NOM_home_area, stops, Population_area)
+# Weighted by population_area
+routing_2021_clean_data$stops_W <- routing_2021_clean_data$stops/sum(routing_2021_clean_data$Population_area)*routing_2021_clean_data$Population_area
+summary(routing_2021_clean_data$stops_W)
+
+routing_2021_clean_data_loop <- routing_2021_clean_data %>% filter(NOM_area == NOM_home_area) 
+new_row <- data.frame( NOM_area = "L'Île-Dorval",
+                       NOM_home_area = "L'Île-Dorval",
+                       stops = 0,
+                       Population_area=30,
+                       stops_W=0) # L'Île-Dorval has 0
+routing_2021_clean_data_loop <- rbind(routing_2021_clean_data_loop, new_row)
+
+```
+
+```{r}
+library(igraph)
+library(visNetwork)
+
+edges <- unique(routing_2021_clean_data[, c("NOM_area", "NOM_home_area", "stops", "stops_W")]) 
+nodes <- routing_2021_clean_data_loop %>% select(NOM_area, stops, stops_W)
+summary(routing_2021_clean_data$stops_W)
+
+network <- graph_from_data_frame(edges, nodes, directed = TRUE)
+#V(network)$stops
+#E(network)
+
+net <- simplify(network, remove.multiple = F, remove.loops = T) 
+
+#Reduce Edge Density
+# Filter edges based on a weight threshold
+edge_threshold <- 0.86583  # Set a threshold for edge weight(First 25%)
+filtered_edges <- E(net)[stops_W > edge_threshold] # only plot stops > 5
+
+# Create a subgraph with only the filtered edges
+net_filtered <- subgraph.edges(net, filtered_edges, delete.vertices = FALSE)
+
+# Plot the filtered graph
+
+set.seed(123)
+# Highlight nodes with high degrees or other centrality measures.
+# Calculate degree centrality
+degree_centrality <- degree(net_filtered)
+V(net_filtered)$size <- degree_centrality / max(degree_centrality) * 10 + 5  # Scale node size
+V(net_filtered)$color <- "lightblue"
+
+# Using visNetwork for interactive plotting
+
+# Convert igraph to visNetwork
+vis_data <- toVisNetworkData(net_filtered)
+nodes <- vis_data$nodes
+edges <- vis_data$edges
+# Create interactive network
+
+# Add stops to the label
+#nodes$label <- paste(nodes$label, nodes$stops, sep = ": Stops=")
+nodes$label <- paste(nodes$stops)
+length(nodes$stops)
+visNetwork(nodes, edges) %>%
+  visEdges(scaling = list(min = 2, max = 10)) %>%
+  visNodes(scaling = list(min = 10, max = 30)) %>%
+  visOptions(highlightNearest = TRUE, nodesIdSelection = TRUE)
+
+map_nodes <- function(edges,nodes) {
+  mtl_sf <- st_as_sf(mtl)
+  
+  # Extract centroids for each state to use as node coordinates
+  mtl_geo_key <- unique(mtl[, c('NOM', "geometry")])
+  
+  nodes <- nodes  %>%
+    left_join(mtl_geo_key, by = c("id" = "NOM")) 
+  nodes_sf <- st_as_sf(nodes)
+  nodes$geometry <- st_centroid(nodes$geometry)
+  
+  edges <- edges %>%
+    left_join(mtl_geo_key, by = c("from" = "NOM")) %>%
+    rename(from_geo = geometry) %>%
+    left_join(mtl_geo_key, by = c("to" = "NOM")) %>%
+    rename(to_geo = geometry) 
+  
+  edges_sf <- st_as_sf(edges)
+  
+  edges_sf$geometry <- mapply(function(from, to) {
+    from_coords <- st_coordinates(st_centroid(from))
+    to_coords <- st_coordinates(st_centroid(to))
+    st_linestring(rbind(from_coords, to_coords))
+  }, edges$from_geo, edges$to_geo, SIMPLIFY = FALSE)
+  
+  #edges_sf <- edges  %>% st_as_sf(coords = c(from_cor, to_cor), crs = 2959)
+  edges_sf <- st_as_sfc(edges_sf$geometry, crs = 2959)
+  edges_sf <- st_as_sf(edges_sf, crs = 2959)
+  
+  ggplot() +
+    geom_sf(data = mtl) +
+    geom_sf(data = edges_sf, color = "blue") +
+    geom_sf(data = nodes$geometry) +
+    geom_text(data = nodes, aes(x = st_coordinates(geometry)[,1], 
+                                y = st_coordinates(geometry)[,2], 
+                                label = label), size = 3, vjust = -1) +
+    ggtitle("2021 25% Network Flow Plot", subtitle = "from July to November") +
+    #geom_text(data = nodes, aes(label = label), size = size, hjust = 1.5) +
+    scale_size_continuous(range = c(0.5, 3)) +
+    scale_color_identity() +
+    theme_map() +
+    theme(legend.position = "none")
+}
+
+map_nodes(edges,nodes)
+```
+
+```{r}
+adjacency_matrix <- as.matrix(as_adjacency_matrix(network, attr="stops"))
+#adjacency_matrix <- as.matrix(as_adjacency_matrix(net_filtered, attr="stops"))
+adjacency_matrix
+#diag(adjacency_matrix) <- DA_clean_data_m1_5_loop$stops
+```
+
+```{r}
+# Create a symmetric matrix by adding the matrix to its transpose
+symmetric_matrix <- adjacency_matrix + t(adjacency_matrix)
+
+# If you want to ensure the diagonal remains the same as in the original matrix (optional)
+diag(symmetric_matrix) <- diag(adjacency_matrix)
+
+# Display the symmetric matrix
+symmetric_matrix
+
+```
+
+
+## use traditional contiguity based neighbourhood matrix as the benchmark spatial model (rather based on graph edge mobility neighbour)
+### generated weight mx
+```{r}
+library(spdep)
+nb <- spdep::poly2nb(mtl, queen = TRUE)
+head(nb) # For nb[[i]], it will list the indices of the polygons that are adjacent to the i-th polygon.
+plot(st_geometry(mtl), border = "lightgray")
+plot.nb(nb, st_geometry(mtl), add = TRUE)
+nb
+```
+
+```{r}
+# Convert neighbors list to adjacency matrix
+adj_matrix <- nb2mat(nb, style = "B")
+
+# Display the adjacency matrix
+adj_matrix #  The indices refer to the row numbers of the spatial polygons in the mtl object.
+```
+
+```{r}
+summary(adj_matrix )
+```
+
