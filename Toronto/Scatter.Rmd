@@ -1,0 +1,131 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-11-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+par(mfrow = c(2, 3)) 
+
+S <- trt_fsa %>% 
+  select(starts_with("i_")) 
+S$stops <- (plot_case$Total_stops)
+num_columns <- ncol(S)
+
+S <- S  %>% 
+  #select(i_young, i_educ_15, i_LICO, Stops, i_move_5yrs,i_rec_imm, i_visMin) %>% 
+  rename("Age below 15" = "i_young") %>% 
+  rename("Max High school 15" = "i_educ_15") %>%
+  rename("Low-income cutoff" = "i_LICO") %>%
+  rename("Moved past 5 yrs" = "i_move_5yrs") %>%
+  rename("Recent immigrants" = "i_rec_imm") %>%
+  rename("Visible minorities" = "i_visMin") %>%
+  rename("Indigenous identity" = "i_aboriginal") %>%
+  rename("Max High sch, 25-64" = "i_educ_25_64") %>%
+  rename("No High sch, 25-64" = "i_educ_noHS_25_64") %>%
+  rename("No High sch, 15" = "i_educ_noHS_15") %>%
+  rename("Moved past 1 yr" = "i_move_1yrs") %>%
+  rename("Age over 65" = "i_old") %>%
+  rename(">30% of income for housing" = "i_tenant_30income") %>%
+  rename("Tenant, as opposed to owner" = "i_tenant")%>%
+  rename("Log of Stops" = "stops")
+# Convert S to a matrix if needed
+S <- as.matrix(S)
+
+# Assuming y is numeric and S is now a matrix
+num_columns <- ncol(S)
+
+for (i in 1:num_columns) {
+  x_values <- S[, i]
+  y_values <- y  # Ensure y is numeric
+  
+  # Plot
+  plot(x_values, y_values,
+       xlab = paste("Variable", i),
+       ylab = "y",
+       main = colnames(S)[i],
+       pch = 19,
+       col = "black")
+}
+
+```
+
+```{r}
+S1 <- S  %>% 
+  select("Visible minorities", "Recent immigrants", "No High sch, 25-64", "Log of Stops", "Age over 65","Low-income cutoff") 
+#S1$cases <- y
+S1 %>% 
+  st_drop_geometry() %>% 
+  cor(use = "complete.obs") %>% 
+  corrplot::corrplot.mixed(number.cex = 1, tl.cex = 0.7)
+
+S2 <- S  %>% 
+  select("Visible minorities", "Recent immigrants", "No High sch, 25-64", "Log of Stops", "Low-income cutoff") 
+#S1$cases <- y
+S2 %>% 
+  st_drop_geometry() %>% 
+  cor(use = "complete.obs") %>% 
+  corrplot::corrplot.mixed(number.cex = 1, tl.cex = 0.7)
+```
+
+```{r}
+ggplot(data = S2) +
+  geom_sf(aes(fill = "Visible minorities", geometry = geometry), color="black")  +
+  scale_fill_gradient(low = "grey10", high = "grey90") +
+  labs(title = "Visible minorities",
+       fill = "Visible minorities") +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, margin = margin(b = 10))
+  ) +
+  theme_void()+
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, margin = margin(t = 10, b = 10)), # Adds top and bottom margin to the title
+    plot.subtitle = element_text(size = 12, hjust = 0.5, margin = margin(t = 5, b = 10)),              # Adds margin to the subtitle
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 9),
+    plot.margin = margin(20, 20, 20, 20)  # Adds extra space around the entire plot
+  )
+```
+```{r}
+  pList_trt
+```
+
+```{r}
+library(sf)        # For handling spatial data
+library(ggplot2)   # For visualization
+
+columns_to_plot <- c("Visible minorities", "Recent immigrants", 
+                     "No High sch, 25–64", "Log of Stops", "Low-income cutoff")
+
+for (col in columns_to_plot) {
+  p <- ggplot(data = S2) +
+    geom_sf(aes_string(fill = col)) +
+    scale_fill_viridis_c(option = "plasma") +
+    labs(
+      title = paste("Variation in", col, "Across Areas"),
+      fill = "Value"
+    ) +
+    theme_minimal()
+  
+  print(p)  # Print each plot
+}
+
+```
+```{r}
+ggplot(data = S2) +
+  geom_sf(aes(fill = `Visible minorities`)) +
+  scale_fill_viridis_c(option = "plasma") +  # Use a color palette to represent variation
+  labs(
+    title = "Variation in Visible Minorities Across Areas",
+    fill = "Proportion"
+  ) +
+  theme_minimal()
+
+```
+
