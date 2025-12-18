@@ -1,4 +1,3 @@
-````markdown
 # Mobility-Network–Informed Bayesian Disease Mapping (Montreal & Toronto)
 
 ## Overview
