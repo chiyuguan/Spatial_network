@@ -1,0 +1,39 @@
+# R
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+
+# R Markdown / knitting
+*_cache/
+*_files/
+*.html
+*.log
+
+# renv
+renv/library/
+renv/python/
+renv/staging/
+renv/activate.R
+
+# Data (adjust to your needs)
+data/
+*.csv
+*.rds
+
+# Stan / CmdStan outputs
+*.csv
+*.RDS
+*.rds
+*.fst
+*.parquet
+*.tar.gz
+*.exe
+*.o
+*.so
+*.dll
+
+# OS
+.DS_Store
+Thumbs.db
