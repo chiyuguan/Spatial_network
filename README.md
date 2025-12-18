@@ -1,3 +1,4 @@
+````markdown
 # Mobility-Network–Informed Bayesian Disease Mapping (Montreal & Toronto)
 
 ## Overview
@@ -35,7 +36,6 @@ Toronto/
     ON_newE.R                       # expected count computation for ON data
     Cov.R                           # covariate processing for ON data
     Scatter.Rmd                     # exploratory plots / diagnostics
-````
 
 ---
 
