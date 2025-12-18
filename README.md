@@ -35,7 +35,7 @@ Toronto/
     ON_newE.R                       # expected count computation for ON data
     Cov.R                           # covariate processing for ON data
     Scatter.Rmd                     # exploratory plots / diagnostics
-
+...
 ---
 
 ## Data Notes
@@ -204,5 +204,3 @@ A detailed description of the Montreal pilot analysis, covariate screening, mode
 
 **Chi Zhang**
 chi.zhang12@mail.mcgill.ca
-
-...
