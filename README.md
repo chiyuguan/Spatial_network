@@ -9,7 +9,6 @@ Extension: **Toronto/Ontario** (work-in-progress).
 ---
 
 ## Repository Structure
-````markdown
 ```text
 Mtl_borough_disease_mapping/
   Mtl_M/
