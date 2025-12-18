@@ -72,21 +72,21 @@ Let $G(N, E)$ denote the mobility graph and let $I$ be a **mobility-based intera
 ### 2) Disease mapping models in Stan
 
 Let $y_i$ be observed case counts in area $i$ and $E_i$ the expected counts. We model:
-$$
+$
 y_i \sim \text{Poisson}(\mu_i), \qquad \log(\mu_i) = \log(E_i) + \eta_i
-$$
+$
 where $\log(E_i)$ is an **offset** and $\eta_i$ is a linear predictor.
 
 Expected counts are computed using age-stratified rates and area populations (schematically):
-$$
+$
 E_i = \sum_{a} n_{i,a}, r_a
-$$
+$
 where $n_{i,a}$ is the population of area $i$ in age group $a$ and $r_a$ is the reference rate for age group $a$.
 
 A typical spatial model specification is:
-$$
+$
 \eta_i = \alpha + \mathbf{x}_i^\top \boldsymbol{\beta} + u_i + v_i
-$$
+$
 
 * $\alpha$: intercept
 * $\mathbf{x}_i$: covariates (e.g., socio-demographics)
